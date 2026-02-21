@@ -195,19 +195,26 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn pearson_correlation(x: &[f64], y: &[f64]) -> f64 {
-    let n = x.len() as f64;
-    if n < 2.0 {
+    let n = x.len();
+    if n < 2 {
         return 0.0;
     }
 
-    let sum_x: f64 = x.iter().sum();
-    let sum_y: f64 = y.iter().sum();
-    let sum_xy: f64 = x.iter().zip(y).map(|(xi, yi)| xi * yi).sum();
-    let sum_xx: f64 = x.iter().map(|xi| xi * xi).sum();
-    let sum_yy: f64 = y.iter().map(|yi| yi * yi).sum();
+    // Two-pass mean-centered formula: numerically stable vs the one-pass
+    // (n·Σxy - Σx·Σy) form which suffers catastrophic cancellation for
+    // large or nearly-equal values (e.g. BTC prices ~90k).
+    let mean_x = x.iter().sum::<f64>() / n as f64;
+    let mean_y = y.iter().sum::<f64>() / n as f64;
 
-    let numerator = n * sum_xy - sum_x * sum_y;
-    let denom = ((n * sum_xx - sum_x * sum_x) * (n * sum_yy - sum_y * sum_y)).sqrt();
+    let (cov, var_x, var_y) =
+        x.iter()
+            .zip(y.iter())
+            .fold((0.0_f64, 0.0_f64, 0.0_f64), |(cov, vx, vy), (&xi, &yi)| {
+                let dx = xi - mean_x;
+                let dy = yi - mean_y;
+                (cov + dx * dy, vx + dx * dx, vy + dy * dy)
+            });
 
-    if denom == 0.0 { 0.0 } else { numerator / denom }
+    let denom = (var_x * var_y).sqrt();
+    if denom == 0.0 { 0.0 } else { cov / denom }
 }

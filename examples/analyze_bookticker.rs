@@ -184,8 +184,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Computing future returns...");
 
-    let mut debug_count = 0;
-
     for (i, snap) in snapshots.iter().enumerate() {
         for (h_idx, &horizon_ms) in horizons.iter().enumerate() {
             let target_ts = snap.ts + horizon_ms;
@@ -209,21 +207,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     if horizon_ms == 500 {
                         samples_500ms.push((snap.imbalance, mid_change));
-
-                        if debug_count < 1000 {
-                            println!(
-                                "DEBUG: CurrTS={} Target={} FoundTS={} DT={} Imb={:.4} RetBps={:.4} Mid={:.2} FutMid={:.2}",
-                                snap.ts,
-                                target_ts,
-                                snapshots[next_idx].ts,
-                                dt,
-                                snap.imbalance,
-                                ret_bps,
-                                snap.mid,
-                                future_mid
-                            );
-                            debug_count += 1;
-                        }
                     }
 
                     preds_simple[h_idx].push(snap.simple_mp - snap.mid);
