@@ -190,15 +190,9 @@ impl SStoikovMicroPrice {
             return 0.0;
         }
 
-        // Find which bucket this imbalance falls into
-        for (i, bound) in self.bounds.iter().enumerate() {
-            if imbalance <= *bound {
-                return self.adjustments[i];
-            }
-        }
-
-        // If greater than all bounds, it's in the last bucket
-        *self.adjustments.last().unwrap_or(&0.0)
+        // Binary search: find first bucket whose upper bound >= imbalance
+        let idx = self.bounds.partition_point(|&b| b < imbalance);
+        self.adjustments[idx.min(self.adjustments.len() - 1)]
     }
 
     /// Save the model to a JSON file
@@ -234,6 +228,10 @@ pub struct SStoikov2DMicroPrice {
 
 impl SStoikov2DMicroPrice {
     pub fn new(min_spread: u32, max_spread: u32) -> Self {
+        assert!(
+            max_spread >= min_spread,
+            "max_spread ({max_spread}) must be >= min_spread ({min_spread})"
+        );
         let num_spreads = (max_spread - min_spread + 1) as usize;
         Self {
             imbalance_bounds: Vec::new(),
@@ -325,15 +323,10 @@ impl SStoikov2DMicroPrice {
     }
 
     fn get_bucket_index(&self, imbalance: f64) -> usize {
-        for (i, bound) in self.imbalance_bounds.iter().enumerate() {
-            if imbalance <= *bound {
-                return i;
-            }
-        }
-        self.imbalance_bounds.len()
+        // Binary search: first bound that is >= imbalance
+        self.imbalance_bounds.partition_point(|&b| b < imbalance)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
