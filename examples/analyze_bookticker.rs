@@ -203,13 +203,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 if (dt - horizon_ms as i64).abs() < 100 {
                     // Allow 100ms tolerance
                     let ret_bps = (future_mid / snap.mid - 1.0) * 10000.0;
-                    let mid_change = future_mid - snap.mid;
-
                     if horizon_ms == 500 {
-                        samples_500ms.push((snap.imbalance, mid_change));
+                        samples_500ms.push((snap.imbalance, ret_bps));
                     }
 
-                    preds_simple[h_idx].push(snap.simple_mp - snap.mid);
+                    preds_simple[h_idx].push((snap.simple_mp / snap.mid - 1.0) * 10000.0);
                     preds_imbalance[h_idx].push(snap.imbalance);
                     targets[h_idx].push(ret_bps);
                     valid_indices[h_idx].push(i);
@@ -239,16 +237,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Train Stoikov Model on TRAIN SET
     let mut stoikov_model = SStoikovMicroPrice::new();
-    stoikov_model.train(train_samples, num_buckets);
+    stoikov_model.fit(train_samples, num_buckets)?;
 
     // Save and Load Verification
     let model_path = "stoikov_bookticker.json";
-    if let Err(e) = stoikov_model.save_to_file(model_path) {
+    if let Err(e) = stoikov_model.save_model(model_path) {
         eprintln!("Failed to save model: {}", e);
     } else {
         println!("Model saved to {}", model_path);
         // Verify Load
-        match SStoikovMicroPrice::load_from_file(model_path) {
+        match SStoikovMicroPrice::load_model(model_path) {
             Ok(loaded_model) => {
                 println!(
                     "Model loaded successfully. Params: {} adjustments",

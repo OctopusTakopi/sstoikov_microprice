@@ -146,8 +146,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let row = &history[hist_idx];
 
                 if let Some(&(_s_mp, imb)) = row.metrics.get(&d) {
-                    let change = row.mid * targets[idx] / 10000.0;
-                    samples_for_train.push((imb, change));
+                    samples_for_train.push((imb, targets[idx]));
                 } else {
                     samples_for_train.push((0.5, 0.0));
                 }
@@ -155,7 +154,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             // Train Stoikov
             let mut model = SStoikovMicroPrice::new();
-            model.train(&samples_for_train, 10);
+            model.fit(&samples_for_train, 10)?;
 
             // EVALUATION (TEST SET)
             let mut simple_preds = Vec::new();
@@ -167,7 +166,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             for &hist_idx in test_indices.iter() {
                 let row = &history[hist_idx];
                 if let Some(&(s_mp, imb)) = row.metrics.get(&d) {
-                    simple_preds.push(s_mp - row.mid);
+                    simple_preds.push((s_mp / row.mid - 1.0) * 10000.0);
                     imb_preds.push(imb);
                     stoikov_preds.push(model.get_adjustment(imb));
                 } else {
