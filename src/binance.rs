@@ -5,17 +5,39 @@ use zerocopy::byteorder::LittleEndian;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 type U16LE = zerocopy::byteorder::U16<LittleEndian>;
+type U32LE = zerocopy::byteorder::U32<LittleEndian>;
 type I64LE = zerocopy::byteorder::I64<LittleEndian>;
 
+const TEMPLATE_TRADES: u16 = 10000;
 const TEMPLATE_BEST_BID_ASK: u16 = 10001;
 const TEMPLATE_DEPTH_SNAPSHOT: u16 = 10002;
 const TEMPLATE_DEPTH_DIFF: u16 = 10003;
 
 #[derive(Debug, Clone)]
 pub enum BinanceEvent {
+    Trades(TradesStreamEvent),
     BestBidAsk(BestBidAskStreamEvent),
     DepthSnapshot(DepthSnapshotStreamEvent),
     DiffBookDepth(DepthDiffStreamEvent),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TradesStreamEvent {
+    pub event_time_us: i64,
+    pub transact_time_us: i64,
+    pub price_exponent: i8,
+    pub qty_exponent: i8,
+    pub trades: Vec<Trade>,
+    pub symbol: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Trade {
+    pub id: i64,
+    pub price_m: i64,
+    pub qty_m: i64,
+    /// Buyer was the resting side, so the aggressor sold.
+    pub is_buyer_maker: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +117,20 @@ impl BinanceEvent {
         let block_length = header.block_length.get() as usize;
 
         match header.template_id.get() {
+            TEMPLATE_TRADES => {
+                let (block, rest) = read_root_block::<TradesBlock>(rest, block_length)?;
+                let (trades, rest) = parse_trades(rest)?;
+                let symbol = parse_symbol(rest)?;
+
+                Some(Self::Trades(TradesStreamEvent {
+                    event_time_us: block.event_time.get(),
+                    transact_time_us: block.transact_time.get(),
+                    price_exponent: block.price_exponent,
+                    qty_exponent: block.qty_exponent,
+                    trades,
+                    symbol,
+                }))
+            }
             TEMPLATE_BEST_BID_ASK => {
                 let (block, rest) = read_root_block::<BestBidAskBlock>(rest, block_length)?;
                 let symbol = parse_symbol(rest)?;
@@ -199,6 +235,36 @@ fn parse_depth_levels(payload: &[u8], price_e: i8, qty_e: i8) -> Option<(Vec<Dep
     }
 
     Some((levels, rest))
+}
+
+fn parse_trades(payload: &[u8]) -> Option<(Vec<Trade>, &[u8])> {
+    let (group_header, rest) = GroupSizeEncoding::read_from_prefix(payload).ok()?;
+    let entry_count = group_header.num_in_group.get() as usize;
+    let block_length = group_header.block_length.get() as usize;
+
+    if entry_count == 0 {
+        return Some((Vec::new(), rest));
+    }
+    if block_length < size_of::<TradeEntry>() {
+        return None;
+    }
+
+    let entries_len = entry_count.checked_mul(block_length)?;
+    let (entries, rest) = rest.split_at_checked(entries_len)?;
+    let trades = entries
+        .chunks_exact(block_length)
+        .map(|chunk| {
+            let entry = TradeEntry::read_from_prefix(chunk).ok()?.0;
+            Some(Trade {
+                id: entry.id.get(),
+                price_m: entry.price.get(),
+                qty_m: entry.qty.get(),
+                is_buyer_maker: entry.is_buyer_maker != 0,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+
+    Some((trades, rest))
 }
 
 fn parse_symbol(payload: &[u8]) -> Option<String> {
@@ -306,6 +372,31 @@ struct GroupSize16Encoding {
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned, Debug, Copy, Clone)]
 #[repr(C)]
+struct GroupSizeEncoding {
+    block_length: U16LE,
+    num_in_group: U32LE,
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned, Debug, Copy, Clone)]
+#[repr(C)]
+struct TradesBlock {
+    event_time: I64LE,
+    transact_time: I64LE,
+    price_exponent: i8,
+    qty_exponent: i8,
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned, Debug, Copy, Clone)]
+#[repr(C)]
+struct TradeEntry {
+    id: I64LE,
+    price: I64LE,
+    qty: I64LE,
+    is_buyer_maker: u8,
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned, Debug, Copy, Clone)]
+#[repr(C)]
 struct BestBidAskBlock {
     event_time: I64LE,
     book_update_id: I64LE,
@@ -404,6 +495,53 @@ mod tests {
                 assert_close(book.best_ask, 12.4);
                 assert_close(book.best_ask_qty, 6.54);
                 assert_eq!(book.symbol.as_str(), "ETHUSDT");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_trades_from_sbe() {
+        let mut payload = Vec::new();
+        push_header(&mut payload, 18, TEMPLATE_TRADES);
+        push_i64(&mut payload, 1_000);
+        push_i64(&mut payload, 999);
+        push_i8(&mut payload, -2);
+        push_i8(&mut payload, -3);
+        push_u16(&mut payload, 25);
+        payload.extend_from_slice(&2u32.to_le_bytes());
+        for (id, price, qty, maker) in [(7, 10_050, 1_500, 1u8), (8, 10_051, 250, 0u8)] {
+            push_i64(&mut payload, id);
+            push_i64(&mut payload, price);
+            push_i64(&mut payload, qty);
+            payload.push(maker);
+        }
+        push_symbol(&mut payload, "BTCUSDT");
+
+        match BinanceEvent::from_sbe(&payload) {
+            Some(BinanceEvent::Trades(event)) => {
+                assert_eq!(event.event_time_us, 1_000);
+                assert_eq!(event.transact_time_us, 999);
+                assert_eq!(event.price_exponent, -2);
+                assert_eq!(event.qty_exponent, -3);
+                assert_eq!(
+                    event.trades,
+                    vec![
+                        Trade {
+                            id: 7,
+                            price_m: 10_050,
+                            qty_m: 1_500,
+                            is_buyer_maker: true,
+                        },
+                        Trade {
+                            id: 8,
+                            price_m: 10_051,
+                            qty_m: 250,
+                            is_buyer_maker: false,
+                        },
+                    ]
+                );
+                assert_eq!(event.symbol.as_str(), "BTCUSDT");
             }
             other => panic!("unexpected event: {other:?}"),
         }

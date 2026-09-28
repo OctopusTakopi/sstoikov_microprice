@@ -10,7 +10,7 @@ pub mod stoikov_markov;
 
 pub use binance::{
     BestBidAskStreamEvent, BinanceEvent, DepthDiffStreamEvent, DepthSnapshotResponse,
-    DepthSnapshotStreamEvent,
+    DepthSnapshotStreamEvent, Trade, TradesStreamEvent,
 };
 pub use raw_sbe::{RawRecord, RawSbeReader};
 pub use stoikov_markov::{
