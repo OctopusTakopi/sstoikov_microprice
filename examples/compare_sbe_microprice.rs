@@ -76,8 +76,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         max_spread_ticks,
         symmetrize: true,
         default_horizon_moves: 6,
-        max_series_terms: 256,
-        convergence_tol: 1e-12,
     };
     stoikov_model.fit(&stoikov_train, tick_size, &stoikov_config)?;
 

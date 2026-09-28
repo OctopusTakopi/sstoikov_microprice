@@ -14,7 +14,8 @@ pub use binance::{
 };
 pub use raw_sbe::{RawRecord, RawSbeReader};
 pub use stoikov_markov::{
-    StoikovMarkovConfig, StoikovMarkovMicroPrice, StoikovObservation, StoikovTransitionRow,
+    MoveSeriesLimit, StoikovMarkovConfig, StoikovMarkovMicroPrice, StoikovObservation,
+    StoikovTransitionRow,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
